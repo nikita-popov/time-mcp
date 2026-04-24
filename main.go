@@ -19,10 +19,10 @@ type Request struct {
 }
 
 type Response struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      any         `json:"id,omitempty"`
-	Result  any         `json:"result,omitempty"`
-	Error   *RespError  `json:"error,omitempty"`
+	JSONRPC string     `json:"jsonrpc"`
+	ID      any        `json:"id,omitempty"`
+	Result  any        `json:"result,omitempty"`
+	Error   *RespError `json:"error,omitempty"`
 }
 
 type RespError struct {
@@ -41,8 +41,8 @@ type CallToolParams struct {
 	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 
-type NowArgs struct {
-	Timezone string `json:"timezone,omitempty"`
+type NowTzArgs struct {
+	Timezone string `json:"timezone"`
 }
 
 type TextContent struct {
@@ -87,7 +87,7 @@ func handle(req Request) {
 				},
 				"serverInfo": map[string]any{
 					"name":    "time-stdio-go",
-					"version": "0.1.0",
+					"version": "0.2.0",
 				},
 			},
 		})
@@ -98,7 +98,7 @@ func handle(req Request) {
 			JSONRPC: "2.0",
 			ID:      req.ID,
 			Result: map[string]any{
-				"tools": []Tool{nowTool()},
+				"tools": []Tool{datetimeNowTool(), datetimeNowTzTool()},
 			},
 		})
 	case "tools/call":
@@ -108,18 +108,30 @@ func handle(req Request) {
 	}
 }
 
-func nowTool() Tool {
+func datetimeNowTool() Tool {
 	return Tool{
-		Name:        "now",
-		Description: "Return current date and time. If timezone is omitted, use TZ env var or UTC.",
+		Name:        "datetime_now",
+		Description: "Return current date and time in the server's configured timezone (TZ env var, fallback UTC). Takes no parameters.",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	}
+}
+
+func datetimeNowTzTool() Tool {
+	return Tool{
+		Name:        "datetime_now_tz",
+		Description: "Return current date and time in the given IANA timezone, e.g. America/New_York.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"timezone": map[string]any{
 					"type":        "string",
-					"description": "IANA timezone, for example Europe/Moscow",
+					"description": "IANA timezone name, e.g. America/New_York or Asia/Tokyo",
 				},
 			},
+			"required": []string{"timezone"},
 		},
 	}
 }
@@ -131,30 +143,31 @@ func handleToolCall(req Request) {
 		return
 	}
 
-	if p.Name != "now" {
-		write(Response{JSONRPC: "2.0", ID: req.ID, Error: &RespError{Code: -32602, Message: "unknown tool"}})
-		return
-	}
+	switch p.Name {
+	case "datetime_now":
+		locName := strings.TrimSpace(os.Getenv("TZ"))
+		if locName == "" {
+			locName = "UTC"
+		}
+		writeTime(req.ID, locName)
 
-	var args NowArgs
-	if len(p.Arguments) > 0 {
-		if err := json.Unmarshal(p.Arguments, &args); err != nil {
-			write(Response{JSONRPC: "2.0", ID: req.ID, Error: &RespError{Code: -32602, Message: "invalid tool arguments"}})
+	case "datetime_now_tz":
+		var args NowTzArgs
+		if err := json.Unmarshal(p.Arguments, &args); err != nil || strings.TrimSpace(args.Timezone) == "" {
+			write(Response{JSONRPC: "2.0", ID: req.ID, Error: &RespError{Code: -32602, Message: "timezone is required"}})
 			return
 		}
-	}
+		writeTime(req.ID, strings.TrimSpace(args.Timezone))
 
-	locName := strings.TrimSpace(args.Timezone)
-	if locName == "" {
-		locName = strings.TrimSpace(os.Getenv("TZ"))
+	default:
+		write(Response{JSONRPC: "2.0", ID: req.ID, Error: &RespError{Code: -32602, Message: "unknown tool: " + p.Name}})
 	}
-	if locName == "" {
-		locName = "UTC"
-	}
+}
 
+func writeTime(id any, locName string) {
 	loc, err := time.LoadLocation(locName)
 	if err != nil {
-		write(Response{JSONRPC: "2.0", ID: req.ID, Error: &RespError{Code: -32602, Message: "invalid timezone: " + locName}})
+		write(Response{JSONRPC: "2.0", ID: id, Error: &RespError{Code: -32602, Message: "invalid timezone: " + locName}})
 		return
 	}
 
@@ -172,7 +185,7 @@ func handleToolCall(req Request) {
 	b, _ := json.Marshal(payload)
 	write(Response{
 		JSONRPC: "2.0",
-		ID:      req.ID,
+		ID:      id,
 		Result: map[string]any{
 			"content": []TextContent{{Type: "text", Text: string(b)}},
 		},
