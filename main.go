@@ -62,11 +62,11 @@ func main() {
 
 		var req Request
 		if err := json.Unmarshal([]byte(line), &req); err != nil {
-			write(Response{JSONRPC: "2.0", Error: &RespError{Code: -32700, Message: "parse error"}})
+			writeTo(os.Stdout, Response{JSONRPC: "2.0", Error: &RespError{Code: -32700, Message: "parse error"}})
 			continue
 		}
 
-		handle(req)
+		handleTo(os.Stdout, req)
 	}
 
 	if err := reader.Err(); err != nil {
@@ -74,10 +74,10 @@ func main() {
 	}
 }
 
-func handle(req Request) {
+func handleTo(w io.Writer, req Request) {
 	switch req.Method {
 	case "initialize":
-		write(Response{
+		writeTo(w, Response{
 			JSONRPC: "2.0",
 			ID:      req.ID,
 			Result: map[string]any{
@@ -94,7 +94,7 @@ func handle(req Request) {
 	case "notifications/initialized":
 		return
 	case "tools/list":
-		write(Response{
+		writeTo(w, Response{
 			JSONRPC: "2.0",
 			ID:      req.ID,
 			Result: map[string]any{
@@ -102,9 +102,9 @@ func handle(req Request) {
 			},
 		})
 	case "tools/call":
-		handleToolCall(req)
+		handleToolCallTo(w, req)
 	default:
-		write(Response{JSONRPC: "2.0", ID: req.ID, Error: &RespError{Code: -32601, Message: "method not found"}})
+		writeTo(w, Response{JSONRPC: "2.0", ID: req.ID, Error: &RespError{Code: -32601, Message: "method not found"}})
 	}
 }
 
@@ -136,10 +136,10 @@ func datetimeNowTzTool() Tool {
 	}
 }
 
-func handleToolCall(req Request) {
+func handleToolCallTo(w io.Writer, req Request) {
 	var p CallToolParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		write(Response{JSONRPC: "2.0", ID: req.ID, Error: &RespError{Code: -32602, Message: "invalid params"}})
+		writeTo(w, Response{JSONRPC: "2.0", ID: req.ID, Error: &RespError{Code: -32602, Message: "invalid params"}})
 		return
 	}
 
@@ -149,25 +149,25 @@ func handleToolCall(req Request) {
 		if locName == "" {
 			locName = "UTC"
 		}
-		writeTime(req.ID, locName)
+		writeTimeTo(w, req.ID, locName)
 
 	case "datetime_now_tz":
 		var args NowTzArgs
 		if err := json.Unmarshal(p.Arguments, &args); err != nil || strings.TrimSpace(args.Timezone) == "" {
-			write(Response{JSONRPC: "2.0", ID: req.ID, Error: &RespError{Code: -32602, Message: "timezone is required"}})
+			writeTo(w, Response{JSONRPC: "2.0", ID: req.ID, Error: &RespError{Code: -32602, Message: "timezone is required"}})
 			return
 		}
-		writeTime(req.ID, strings.TrimSpace(args.Timezone))
+		writeTimeTo(w, req.ID, strings.TrimSpace(args.Timezone))
 
 	default:
-		write(Response{JSONRPC: "2.0", ID: req.ID, Error: &RespError{Code: -32602, Message: "unknown tool: " + p.Name}})
+		writeTo(w, Response{JSONRPC: "2.0", ID: req.ID, Error: &RespError{Code: -32602, Message: "unknown tool: " + p.Name}})
 	}
 }
 
-func writeTime(id any, locName string) {
+func writeTimeTo(w io.Writer, id any, locName string) {
 	loc, err := time.LoadLocation(locName)
 	if err != nil {
-		write(Response{JSONRPC: "2.0", ID: id, Error: &RespError{Code: -32602, Message: "invalid timezone: " + locName}})
+		writeTo(w, Response{JSONRPC: "2.0", ID: id, Error: &RespError{Code: -32602, Message: "invalid timezone: " + locName}})
 		return
 	}
 
@@ -183,7 +183,7 @@ func writeTime(id any, locName string) {
 	}
 
 	b, _ := json.Marshal(payload)
-	write(Response{
+	writeTo(w, Response{
 		JSONRPC: "2.0",
 		ID:      id,
 		Result: map[string]any{
@@ -192,7 +192,6 @@ func writeTime(id any, locName string) {
 	})
 }
 
-func write(v any) {
-	enc := json.NewEncoder(os.Stdout)
-	_ = enc.Encode(v)
+func writeTo(w io.Writer, v any) {
+	_ = json.NewEncoder(w).Encode(v)
 }
