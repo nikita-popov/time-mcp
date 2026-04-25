@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+// version is set at build time via -ldflags "-X main.version=v1.2.3".
+// Falls back to "dev" for plain `go run` / `go test`.
+var version = "dev"
+
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      any             `json:"id,omitempty"`
@@ -86,8 +90,8 @@ func handleTo(w io.Writer, req Request) {
 					"tools": map[string]any{},
 				},
 				"serverInfo": map[string]any{
-					"name":    "time-stdio-go",
-					"version": "0.2.0",
+					"name":    "time-mcp",
+					"version": version,
 				},
 			},
 		})
